@@ -3,66 +3,67 @@
 set -e  # Exit on any command failure
 set -x  # Enable debugging
 
-# Ensure dependencies
-command -v jq >/dev/null 2>&1 || { echo "jq is not installed. Exiting."; exit 1; }
-command -v zip >/dev/null 2>&1 || { echo "zip is not installed. Exiting."; exit 1; }
-
-# Variables
+# Variables (use the same names and conventions from the setup script)
 role_name="s3-lambda-sns"
-bucket_name="abhishek-ultimate-bucket-$(date +%s)"
+bucket_name="abhishek-ultimate-bucket-*"
 lambda_function_name="s3-lambda-function"
-zip_file="s3-lambda-function.zip"
+sns_topic_name="s3-event-notifications"
 region="us-east-1"
 
-# Create or fetch IAM Role
-if ! role_arn=$(aws iam get-role --role-name $role_name --query 'Role.Arn' --output text 2>/dev/null); then
-  echo "Creating IAM role..."
-  role_arn=$(aws iam create-role --role-name $role_name \
-    --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
-    --query 'Role.Arn' --output text)
-fi
-echo "Role ARN: $role_arn"
-
-# Attach policies
-aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
-aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AmazonSNSFullAccess
-aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
-
-# Create S3 bucket
-if ! aws s3api head-bucket --bucket $bucket_name 2>/dev/null; then
-  echo "Creating S3 bucket: $bucket_name"
-  aws s3api create-bucket --bucket $bucket_name --region $region
+# Delete the Lambda function
+if aws lambda get-function --function-name $lambda_function_name >/dev/null 2>&1; then
+  echo "Deleting Lambda function: $lambda_function_name"
+  aws lambda delete-function --function-name $lambda_function_name
 else
-  echo "Bucket $bucket_name already exists."
+  echo "Lambda function $lambda_function_name does not exist."
 fi
 
-# Upload test file
-echo "Sample file content" > example_file.txt
-aws s3 cp example_file.txt s3://$bucket_name/example_file.txt
-
-# Create Lambda function zip
-mkdir -p s3-lambda-function
-echo "def lambda_handler(event, context): print(event)" > s3-lambda-function/lambda_function.py
-zip -r $zip_file ./s3-lambda-function
-
-# Create Lambda function
-if ! aws lambda get-function --function-name $lambda_function_name 2>/dev/null; then
-  echo "Creating Lambda function..."
-  aws lambda create-function --region $region --function-name $lambda_function_name \
-    --runtime python3.8 --handler lambda_function.lambda_handler \
-    --role $role_arn --zip-file fileb://./$zip_file
+# Delete S3 bucket and objects
+if buckets=$(aws s3api list-buckets --query "Buckets[?contains(Name, \`abhishek-ultimate-bucket-\`) == \`true\`].Name" --output text); then
+  for bucket in $buckets; do
+    echo "Deleting all objects from S3 bucket: $bucket"
+    aws s3 rm s3://$bucket --recursive
+    echo "Deleting S3 bucket: $bucket"
+    aws s3api delete-bucket --bucket $bucket
+  done
+else
+  echo "No matching S3 buckets found."
 fi
 
-# Add bucket permissions for Lambda
-aws lambda add-permission --function-name $lambda_function_name \
-  --statement-id AllowS3Invoke --action lambda:InvokeFunction \
-  --principal s3.amazonaws.com --source-arn "arn:aws:s3:::$bucket_name"
+# Delete SNS topic
+if sns_topic_arn=$(aws sns list-topics --query "Topics[?ends_with(TopicArn, \`:$sns_topic_name\`)].TopicArn" --output text); then
+  echo "Deleting SNS topic: $sns_topic_name"
+  aws sns delete-topic --topic-arn $sns_topic_arn
+else
+  echo "SNS topic $sns_topic_name does not exist."
+fi
 
-# Set S3 bucket notification
-aws s3api put-bucket-notification-configuration --bucket $bucket_name --notification-configuration "{
-  \"LambdaFunctionConfigurations\": [{
-    \"LambdaFunctionArn\": \"arn:aws:lambda:$region:$(aws sts get-caller-identity --query Account --output text):function:$lambda_function_name\",
-    \"Events\": [\"s3:ObjectCreated:*\"
-    ]
-  }]
-}"
+# Detach and delete IAM role
+if aws iam get-role --role-name $role_name >/dev/null 2>&1; then
+  echo "Detaching policies from IAM role: $role_name"
+  attached_policies=$(aws iam list-attached-role-policies --role-name $role_name --query "AttachedPolicies[].PolicyArn" --output text)
+  for policy in $attached_policies; do
+    aws iam detach-role-policy --role-name $role_name --policy-arn $policy
+  done
+
+  echo "Deleting IAM role: $role_name"
+  aws iam delete-role --role-name $role_name
+else
+  echo "IAM role $role_name does not exist."
+fi
+
+# Cleanup temporary files
+if [ -f example_file.txt ]; then
+  echo "Removing temporary files."
+  rm -f example_file.txt
+fi
+
+if [ -f s3-lambda-function.zip ]; then
+  rm -f s3-lambda-function.zip
+fi
+
+if [ -d s3-lambda-function ]; then
+  rm -rf s3-lambda-function
+fi
+
+echo "All resources cleaned up successfully."
