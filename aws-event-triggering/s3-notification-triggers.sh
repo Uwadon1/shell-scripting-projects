@@ -61,31 +61,20 @@ else
   exit 1
 fi
 
-# Zip the Lambda function
-if [ -f s3-lambda-function/lambda_function.py ]; then
-  zip -r s3-lambda-function.zip ./s3-lambda-function
-  echo "Lambda function code zipped successfully."
-else
-  echo "Lambda function code (s3-lambda-function/lambda_function.py) not found. Exiting."
-  exit 1
-fi
+# Create a Zip file to upload Lambda Function
+zip -r s3-lambda-function.zip ./s3-lambda-function
 
-# Create the Lambda function
+sleep 5
+# Create a Lambda function
 aws lambda create-function \
   --region "$aws_region" \
   --function-name $lambda_func_name \
   --runtime "python3.8" \
-  --handler "lambda_function.lambda_handler" \
+  --handler "s3-lambda-function/s3-lambda-function.lambda_handler" \
   --memory-size 128 \
   --timeout 30 \
-  --role "$role_arn" \
+  --role "arn:aws:iam::$aws_account_id:role/$role_name" \
   --zip-file "fileb://./s3-lambda-function.zip"
-if [ $? -eq 0 ]; then
-  echo "Lambda function created successfully."
-else
-  echo "Failed to create Lambda function. Exiting."
-  exit 1
-fi
 
 # Add Permissions to S3 Bucket to invoke Lambda
 aws lambda add-permission \
