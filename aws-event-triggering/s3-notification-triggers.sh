@@ -2,18 +2,15 @@
 
 set -x
 
-# Store the AWS account ID in a variable
-aws_account_id=$(aws sts get-caller-identity --query 'Account' --output text)
-
-# Print the AWS account ID from the variable
-echo "AWS Account ID: $aws_account_id"
-
 # Set AWS region and bucket name
 aws_region="us-east-1"
 bucket_name="abhishek-ultimate-bucket-$(date +%s)"  # Unique bucket name to avoid conflict
 lambda_func_name="s3-lambda-function"
 role_name="s3-lambda-sns"
 email_address="zyz@gmail.com"
+
+# Get the AWS account ID
+aws_account_id=$(aws sts get-caller-identity --query 'Account' --output text)
 
 # Create IAM Role for the project
 role_response=$(aws iam create-role --role-name $role_name --assume-role-policy-document '{
@@ -42,28 +39,36 @@ aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:
 aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AmazonSNSFullAccess
 aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
 
-# Create the S3 bucket
-aws s3api create-bucket --bucket "$bucket_name" --region "$aws_region" --create-bucket-configuration LocationConstraint="$aws_region"
-echo "Bucket created successfully: $bucket_name"
+# Create the S3 bucket (no location constraint for us-east-1)
+aws s3api create-bucket --bucket "$bucket_name" --region "$aws_region"
+if [ $? -eq 0 ]; then
+  echo "Bucket created successfully: $bucket_name"
+else
+  echo "Failed to create bucket. Exiting."
+  exit 1
+fi
 
 # Enable public access on the bucket
-aws s3api put-public-access-block --bucket $bucket_name --public-access-block-configuration '{"BlockPublicAcls":false,"IgnorePublicAcls":false,"BlockPublicPolicy":false,"RestrictPublicBuckets":false}'
+aws s3api put-public-access-block --bucket "$bucket_name" --public-access-block-configuration '{"BlockPublicAcls":false,"IgnorePublicAcls":false,"BlockPublicPolicy":false,"RestrictPublicBuckets":false}'
 echo "Public access enabled on the bucket."
 
-# Upload a file to the bucket (make sure the file exists in the same directory or update path)
-aws s3 cp ./example_file.txt s3://"$bucket_name"/example_file.txt
-echo "File uploaded to S3 bucket."
+# Upload a file to the bucket (ensure the file exists)
+if [ -f ./example_file.txt ]; then
+  aws s3 cp ./example_file.txt s3://"$bucket_name"/example_file.txt
+  echo "File uploaded to S3 bucket."
+else
+  echo "File 'example_file.txt' does not exist. Please make sure the file is in the current directory."
+  exit 1
+fi
 
 # Zip the Lambda function
 if [ -f s3-lambda-function/lambda_function.py ]; then
   zip -r s3-lambda-function.zip ./s3-lambda-function
   echo "Lambda function code zipped successfully."
 else
-  echo "Lambda function code (lambda_function.py) not found. Exiting."
+  echo "Lambda function code (s3-lambda-function/lambda_function.py) not found. Exiting."
   exit 1
 fi
-
-sleep 5
 
 # Create the Lambda function
 aws lambda create-function \
@@ -75,7 +80,12 @@ aws lambda create-function \
   --timeout 30 \
   --role "$role_arn" \
   --zip-file "fileb://./s3-lambda-function.zip"
-echo "Lambda function created successfully."
+if [ $? -eq 0 ]; then
+  echo "Lambda function created successfully."
+else
+  echo "Failed to create Lambda function. Exiting."
+  exit 1
+fi
 
 # Add Permissions to S3 Bucket to invoke Lambda
 aws lambda add-permission \
@@ -94,7 +104,7 @@ aws s3api put-bucket-notification-configuration \
   --notification-configuration "{
     \"LambdaFunctionConfigurations\": [{
         \"LambdaFunctionArn\": \"$LambdaFunctionArn\",
-        \"Events\": [\"s3:ObjectCreated:*\"]
+        \"Events\": [\"s3:ObjectCreated:*\"] 
     }]
 }"
 echo "S3 event notification configured to trigger Lambda."
@@ -114,7 +124,7 @@ echo "Email subscription created. Please check your inbox and confirm the subscr
 aws sns publish \
   --topic-arn "$topic_arn" \
   --subject "A new object created in s3 bucket" \
-  --message "Hello from my sample project, Learn learning how to trigger events on S2 using event notification"
+  --message "Hello from Abhishek.Veeramalla YouTube channel, Learn DevOps Zero to Hero for Free"
 echo "Message published to SNS."
 
 # Script execution complete
