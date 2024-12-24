@@ -34,6 +34,10 @@ role_arn=$(echo "$role_response" | jq -r '.Role.Arn')
 # Print the role ARN
 echo "Role ARN: $role_arn"
 
+# Wait for IAM role propagation
+echo "Waiting for IAM role propagation..."
+sleep 10
+
 # Attach Permissions to the Role
 aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AWSLambda_FullAccess
 aws iam attach-role-policy --role-name $role_name --policy-arn arn:aws:iam::aws:policy/AmazonSNSFullAccess
@@ -61,12 +65,19 @@ else
   exit 1
 fi
 
+# Validate the Lambda ZIP file
+if [ ! -f ./s3-lambda-function.zip ]; then
+  echo "Lambda ZIP file not found. Exiting."
+  exit 1
+fi
+
 # Create a Zip file to upload Lambda Function
 zip -r s3-lambda-function.zip ./s3-lambda-function
 
 sleep 5
-# Create a Lambda function
-aws lambda create-function \
+
+# Create the Lambda function
+lambda_create_response=$(aws lambda create-function \
   --region "$aws_region" \
   --function-name $lambda_func_name \
   --runtime "python3.8" \
@@ -74,7 +85,24 @@ aws lambda create-function \
   --memory-size 128 \
   --timeout 30 \
   --role "arn:aws:iam::$aws_account_id:role/$role_name" \
-  --zip-file "fileb://./s3-lambda-function.zip"
+  --zip-file "fileb://./s3-lambda-function.zip" 2>&1)
+
+# Check if Lambda creation succeeded
+if echo "$lambda_create_response" | grep -q "FunctionName"; then
+  echo "Lambda function creation initiated."
+else
+  echo "Failed to create Lambda function: $lambda_create_response"
+  exit 1
+fi
+
+# Wait for the Lambda function to become active
+lambda_status=""
+while [ "$lambda_status" != "Active" ]; do
+  echo "Waiting for Lambda function to become active..."
+  sleep 10
+  lambda_status=$(aws lambda get-function --function-name $lambda_func_name --region "$aws_region" --query 'Configuration.State' --output text 2>/dev/null)
+done
+echo "Lambda function is now active."
 
 # Add Permissions to S3 Bucket to invoke Lambda
 aws lambda add-permission \
@@ -108,6 +136,10 @@ aws sns subscribe \
   --protocol email \
   --notification-endpoint "$email_address"
 echo "Email subscription created. Please check your inbox and confirm the subscription."
+
+# Test subscription status
+sns_sub_status=$(aws sns list-subscriptions --output json | jq '.Subscriptions[] | select(.Endpoint=="'"$email_address"'")')
+echo "SNS Subscription Status: $sns_sub_status"
 
 # Publish a message to SNS
 aws sns publish \
