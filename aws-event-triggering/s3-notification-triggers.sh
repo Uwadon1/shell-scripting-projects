@@ -46,18 +46,22 @@ echo "Created SNS Topic: $sns_topic_arn"
 aws sns subscribe --topic-arn $sns_topic_arn --protocol email --notification-endpoint $subscription_email
 echo "Email subscription created. Please check your email ($subscription_email) and confirm the subscription."
 
-# Add Bucket Permissions for SNS
-bucket_policy='{
-  "Version": "2012-10-17",
-  "Statement": [
+# Corrected bucket policy with proper variable substitution
+bucket_policy="{
+  \"Version\": \"2012-10-17\",
+  \"Statement\": [
     {
-      "Effect": "Allow",
-      "Principal": "*",
-      "Action": "s3:PutObject",  # Corrected action
-      "Resource": "arn:aws:s3:::$bucket_name/*"  # Ensure you specify objects in the bucket
+      \"Effect\": \"Allow\",
+      \"Principal\": \"*\",
+      \"Action\": \"s3:PutObject\",
+      \"Resource\": \"arn:aws:s3:::$bucket_name/*\"
     }
   ]
-}'
+}"
+
+# Apply the corrected bucket policy
+aws s3api put-bucket-policy --bucket $bucket_name --policy "$bucket_policy"
+
 
 # Apply bucket policy with the corrected action and resource
 aws s3api put-bucket-policy --bucket $bucket_name --policy "$bucket_policy"
