@@ -12,7 +12,7 @@ role_name="s3-lambda-sns"
 bucket_name="abhishek-ultimate-bucket-$(date +%s)"
 lambda_function_name="s3-lambda-function"
 sns_topic_name="s3-event-notifications"
-subscription_email="ig0gwpnrd0@wywnxa.com"  # Replace with actual email
+subscription_email="uwadon1@gmail.com"  # Replace with the desired email
 zip_file="s3-lambda-function.zip"
 region="us-east-1"
 
@@ -47,21 +47,30 @@ aws sns subscribe --topic-arn $sns_topic_arn --protocol email --notification-end
 echo "Email subscription created. Please check your email ($subscription_email) and confirm the subscription."
 
 # Add Bucket Permissions for SNS
-sns_topic_policy='{
+bucket_policy='{
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
       "Principal": "*",
-      "Action": "SNS:Publish",
-      "Resource": "'"$sns_topic_arn"'",
-      "Condition": {
-        "StringEquals": {
-          "AWS:SourceArn": "arn:aws:s3:::'"$bucket_name"'"
-        }
-      }
+      "Action": "sns:Publish",
+      "Resource": "'"$sns_topic_arn"'"
     }
   ]
 }'
-aws sns set-topic-attributes \
-  --topic-arn "
+aws s3api put-bucket-policy --bucket $bucket_name --policy "$bucket_policy"
+
+# Set S3 bucket notification for SNS
+aws s3api put-bucket-notification-configuration --bucket $bucket_name --notification-configuration "{
+  \"TopicConfigurations\": [{
+    \"TopicArn\": \"$sns_topic_arn\",
+    \"Events\": [\"s3:ObjectCreated:*\"
+    ]
+  }]
+}"
+
+# Upload test file
+echo "Sample file content" > example_file.txt
+aws s3 cp example_file.txt s3://$bucket_name/example_file.txt
+
+echo "Setup complete. Waiting for confirmation email for SNS subscription."
