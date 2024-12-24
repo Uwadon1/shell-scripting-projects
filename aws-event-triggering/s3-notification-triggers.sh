@@ -7,7 +7,7 @@ aws_region="us-east-1"
 bucket_name="abhishek-ultimate-bucket-$(date +%s)"  # Unique bucket name to avoid conflict
 lambda_func_name="s3-lambda-function"
 role_name="s3-lambda-sns"
-email_address="zyz@gmail.com"
+email_address="uwadonejodinhojoshua@gmail.com"
 
 # Get the AWS account ID
 aws_account_id=$(aws sts get-caller-identity --query 'Account' --output text)
